@@ -1,0 +1,300 @@
+brief:
+  title: "EPS Corporation | GovCon Morning Intelligence Brief"
+  lookback_hours: 36
+  max_items: 45
+  top_items: 10
+  min_score: 2
+  output_dir: "output"
+
+# EPS-wide mission map. Add/remove terms without changing Python.
+agency_groups:
+  Navy_Marine_Corps:
+    weight: 4
+    keywords:
+      - "Department of the Navy"
+      - "U.S. Navy"
+      - "US Navy"
+      - "NAVSEA"
+      - "NAVAIR"
+      - "NAVWAR"
+      - "NAVFAC"
+      - "NSWC"
+      - "NIWC"
+      - "Marine Corps"
+      - "USMC"
+  Army:
+    weight: 4
+    keywords:
+      - "Department of the Army"
+      - "U.S. Army"
+      - "Army Materiel Command"
+      - "Army Futures Command"
+      - "PEO"
+      - "DEVCOM"
+      - "USACE"
+  Air_Force_Space_Force:
+    weight: 4
+    keywords:
+      - "Department of the Air Force"
+      - "U.S. Air Force"
+      - "USAF"
+      - "Space Force"
+      - "USSF"
+      - "AFMC"
+      - "AFRL"
+      - "SSC"
+  Defense_Agencies:
+    weight: 4
+    keywords:
+      - "Department of Defense"
+      - "Defense Logistics Agency"
+      - "DLA"
+      - "DISA"
+      - "DHA"
+      - "MDA"
+      - "DARPA"
+      - "DCMA"
+      - "DCAA"
+  SOCOM:
+    weight: 5
+    keywords:
+      - "USSOCOM"
+      - "SOCOM"
+      - "Special Operations Command"
+      - "SOF"
+      - "NSW"
+      - "Naval Special Warfare"
+  Homeland_Security:
+    weight: 5
+    keywords:
+      - "Department of Homeland Security"
+      - "DHS"
+      - "Coast Guard"
+      - "USCG"
+      - "CBP"
+      - "Customs and Border Protection"
+      - "FEMA"
+      - "CISA"
+      - "TSA"
+      - "Secret Service"
+  Civilian_Federal:
+    weight: 2
+    keywords:
+      - "GSA"
+      - "NASA"
+      - "Department of State"
+      - "Department of Justice"
+      - "Department of Energy"
+      - "Department of Transportation"
+      - "Department of Veterans Affairs"
+
+capability_groups:
+  Engineering_Prototyping:
+    weight: 3
+    keywords:
+      - engineering
+      - systems engineering
+      - prototyping
+      - prototype
+      - integration
+      - testing
+      - test and evaluation
+      - T&E
+      - configuration management
+  Fabrication_Maintenance:
+    weight: 3
+    keywords:
+      - fabrication
+      - machining
+      - welding
+      - depot
+      - overhaul
+      - maintenance
+      - repair
+      - manufacturing
+      - additive manufacturing
+  Software_IT_Cyber:
+    weight: 3
+    keywords:
+      - software
+      - cloud
+      - DevSecOps
+      - cybersecurity
+      - cyber
+      - zero trust
+      - network
+      - C5ISR
+      - command and control
+      - artificial intelligence
+      - AI
+  Logistics_Lifecycle:
+    weight: 3
+    keywords:
+      - logistics
+      - lifecycle
+      - life cycle
+      - sustainment
+      - supply chain
+      - provisioning
+      - property management
+      - obsolescence
+  Training_AV:
+    weight: 3
+    keywords:
+      - training system
+      - simulator
+      - simulation
+      - curriculum
+      - audiovisual
+      - audio visual
+      - instructional
+  Program_Business_Support:
+    weight: 2
+    keywords:
+      - program management
+      - project management
+      - financial management
+      - scheduling
+      - administrative support
+      - technical writing
+      - data analysis
+
+event_groups:
+  Acquisition_Signal:
+    weight: 5
+    keywords:
+      - sources sought
+      - request for information
+      - RFI
+      - draft solicitation
+      - draft RFP
+      - presolicitation
+      - pre-solicitation
+      - acquisition forecast
+      - industry day
+      - recompete
+      - re-compete
+      - follow-on
+  Award:
+    weight: 4
+    keywords:
+      - contract award
+      - awarded
+      - task order
+      - delivery order
+      - IDIQ
+      - BPA
+      - OTA
+  Protest:
+    weight: 4
+    keywords:
+      - bid protest
+      - protest sustained
+      - protest denied
+      - protest dismissed
+      - GAO
+  Policy_Regulation:
+    weight: 4
+    keywords:
+      - FAR
+      - DFARS
+      - acquisition regulation
+      - Federal Register
+      - CMMC
+      - small business rule
+      - SBA
+      - set-aside
+      - procurement policy
+  Industry_Move:
+    weight: 3
+    keywords:
+      - acquisition
+      - merger
+      - acquired
+      - partnership
+      - teaming
+      - strategic alliance
+      - appoints
+      - named
+      - joins
+      - executive
+  Budget_Program:
+    weight: 3
+    keywords:
+      - budget
+      - authorization act
+      - appropriations
+      - NDAA
+      - program office
+      - modernization
+      - readiness
+      - industrial base
+
+# Trusted/high-value domains receive a small score boost.
+source_priority:
+  defense.gov: 3
+  federalregister.gov: 3
+  sam.gov: 3
+  gao.gov: 3
+  acquisition.gov: 3
+  gsa.gov: 2
+  sba.gov: 2
+  dhs.gov: 2
+  navy.mil: 2
+  army.mil: 2
+  af.mil: 2
+  spaceforce.mil: 2
+  uscg.mil: 2
+  breakingdefense.com: 1
+  defensenews.com: 1
+  federalnewsnetwork.com: 1
+  washingtontechnology.com: 1
+  govconwire.com: 1
+  executivegov.com: 1
+
+# Google News RSS is used as an aggregator, not scraped HTML.
+# Add/remove queries to tune coverage.
+news_queries:
+  - name: "Defense acquisition"
+    query: '"defense contract" OR "contract award" OR "acquisition"'
+  - name: "Navy Marine Corps"
+    query: '"Navy" OR "Marine Corps" NAVSEA OR NAVAIR OR NAVWAR contract'
+  - name: "Army"
+    query: '"U.S. Army" contract OR acquisition OR modernization'
+  - name: "Air Force Space Force"
+    query: '"Air Force" OR "Space Force" contract OR acquisition'
+  - name: "SOCOM"
+    query: 'SOCOM OR USSOCOM OR "special operations" contract acquisition'
+  - name: "DHS"
+    query: 'DHS OR "Homeland Security" OR USCG OR CISA OR CBP contract acquisition'
+  - name: "GovCon policy"
+    query: 'FAR OR DFARS OR CMMC OR "federal acquisition" OR "small business contracting"'
+  - name: "GovCon industry"
+    query: '"government contracting" OR GovCon acquisition merger partnership executive'
+  - name: "Defense industrial base"
+    query: '"defense industrial base" manufacturing supply chain shipbuilding electronics'
+  - name: "Federal technology"
+    query: '"federal IT" OR cybersecurity OR DevSecOps OR C5ISR government contract'
+
+federal_register:
+  enabled: true
+  agencies:
+    - defense-department
+    - homeland-security-department
+    - general-services-administration
+    - small-business-administration
+  terms:
+    - acquisition
+    - procurement
+    - contracting
+    - small business
+    - cybersecurity
+    - defense industrial base
+    - FAR
+    - DFARS
+
+sam:
+  enabled: false
+  # Enable after setting SAM_API_KEY in environment.
+  posted_days: 2
+  limit: 100
