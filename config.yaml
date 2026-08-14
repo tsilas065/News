@@ -6,17 +6,37 @@ brief:
   min_score: 5
   output_dir: "output"
 
-  # Keep the brief on federal contracting. When true, an item is dropped unless
-  # it touches a tracked agency, a watchlist company, one of the qualifying
-  # events below, or an authoritative .gov/.mil source. This is what filters out
-  # sports, consumer tech, and generic business stories. Set false to see
+  # Keep the brief on federal contracting. When true, an item is kept only if it
+  # names a tracked agency, a watchlist company, or comes from a .gov/.mil
+  # source. Event/capability keywords (awarded, software, AI, ...) add score and
+  # tags but are too ambiguous to qualify a story on their own. Set false to see
   # everything that clears min_score.
   require_relevance: true
-  qualifying_events:
-    - Acquisition_Signal
-    - Award
-    - Protest
-    - Policy_Regulation
+
+  # Hard exclusions: drop any item containing one of these whole words, even if
+  # it matched an agency. Catches agency-name collisions and obvious off-topic
+  # content. Add terms whenever you spot noise; remove any that hide real items.
+  exclude_keywords:
+    - "college football"
+    - "NCAA"
+    - "Army-Navy game"
+    - "Navy football"
+    - "Army football"
+    - "Old Navy"
+    - "Navy Federal"
+    - "Salvation Army"
+    - "rugby"
+    - "playoff"
+    - "Super Bowl"
+    - "NBA"
+    - "NFL"
+    - "MLB"
+    - "NHL"
+    - "box office"
+    - "Grammy"
+    - "telethon"
+    - "recipe"
+    - "horoscope"
 
 # EPS-wide mission map. Add/remove terms without changing Python.
 agency_groups:
@@ -64,8 +84,8 @@ agency_groups:
       - "Defense Logistics Agency"
       - "DLA"
       - "DISA"
-      - "DHA"
-      - "MDA"
+      - "Defense Health Agency"
+      - "Missile Defense Agency"
       - "DARPA"
       - "DCMA"
       - "DCAA"
@@ -76,7 +96,6 @@ agency_groups:
       - "SOCOM"
       - "Special Operations Command"
       - "SOF"
-      - "NSW"
       - "Naval Special Warfare"
   Homeland_Security:
     weight: 5
@@ -217,12 +236,14 @@ event_groups:
     weight: 4
     keywords:
       - contract award
-      - awarded
+      - contract awarded
+      - awarded a contract
       - task order
       - delivery order
       - IDIQ
-      - BPA
-      - OTA
+      - blanket purchase agreement
+      - other transaction authority
+      - other transaction agreement
   Protest:
     weight: 4
     keywords:

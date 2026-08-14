@@ -308,18 +308,25 @@ def score_items(items: list[Item], config: dict) -> list[Item]:
     return sorted(items, key=lambda x: (x.score, x.published), reverse=True)
 
 
-def is_relevant(item: Item, qualifying_events: set[str]) -> bool:
+def is_relevant(item: Item, exclude_terms: Iterable[str]) -> bool:
     """Gate that keeps the brief focused on federal contracting.
 
-    An item qualifies only if it actually touches the mission: a tracked
-    agency, a watchlist company, a hard contracting event (award, protest,
-    acquisition signal, policy/regulation), or an authoritative government
-    source. Generic capability or industry/budget keywords alone are not
-    enough — that is what let sports and consumer-tech stories through.
+    Two stages:
+
+    1. Hard exclude — if any ``exclude_keywords`` term appears (whole word),
+       drop the item outright. This catches agency-name collisions such as
+       "Army-Navy game", "Old Navy" or an "MDA telethon".
+    2. Primary mission signal — keep the item only if it names a tracked
+       agency, a watchlist company, or comes from an authoritative .gov/.mil
+       source. Event and capability keywords add score and tags but are too
+       ambiguous to qualify a story on their own (e.g. "awarded", "BPA"),
+       so they never pass the gate by themselves.
     """
+    text = f"{item.title} {item.summary}".lower()
+    for term in exclude_terms:
+        if keyword_in(text, term):
+            return False
     if item.agencies or item.companies:
-        return True
-    if any(ev in qualifying_events for ev in item.events):
         return True
     domain = item.domain
     if domain.endswith(".gov") or domain.endswith(".mil"):
@@ -485,12 +492,9 @@ def main() -> int:
     items = [x for x in items if x.score >= min_score]
 
     if config["brief"].get("require_relevance", True):
-        qualifying = set(config["brief"].get(
-            "qualifying_events",
-            ["Acquisition_Signal", "Award", "Protest", "Policy_Regulation"],
-        ))
+        exclude = config["brief"].get("exclude_keywords", []) or []
         before = len(items)
-        items = [x for x in items if is_relevant(x, qualifying)]
+        items = [x for x in items if is_relevant(x, exclude)]
         print(f"Relevance gate: kept {len(items)} of {before} scored items "
               f"(dropped {before - len(items)} off-mission).")
 

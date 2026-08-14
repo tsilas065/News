@@ -72,34 +72,38 @@ Two mechanisms keep sports, consumer tech, and generic business stories out:
    matches "D**FAR**S", and `PEO` no longer matches "**peo**ple".
 
 2. **Relevance gate** (`require_relevance: true`). After scoring, an item is
-   kept only if it genuinely touches the mission — it must have at least one of:
+   kept only if it carries a **primary mission signal**:
 
    - a tracked **agency** match (Navy, Army, DHS, …),
-   - a **watchlist company** match,
-   - a **qualifying event** (`qualifying_events`, default: Acquisition_Signal,
-     Award, Protest, Policy_Regulation), or
+   - a **watchlist company** match, or
    - an authoritative **`.gov` / `.mil` source**.
 
-   Capability keywords (engineering, software, AI) and soft events
-   (industry moves, budgets) add score and context but **cannot qualify an item
-   on their own** — that is what previously let a sports trade or an AI product
-   launch through on recency alone.
+   Event and capability keywords (awarded, software, AI, engineering, …) add
+   score and tags but are **too ambiguous to qualify a story on their own** —
+   that is what previously let "Taylor Swift *awarded*…" or a *BPA*-free bottle
+   review through. They now only re-rank items that already passed the gate.
+
+3. **Exclusion list** (`exclude_keywords`). Some agency names collide with
+   everyday content — "Army-Navy game", "Old Navy", "Salvation Army", an "MDA
+   telethon". Any item containing an exclusion term (whole word) is dropped
+   even if it matched an agency. Grow this list whenever you spot noise.
 
 Tuning knobs in `config.yaml` under `brief`:
 
 ```yaml
 min_score: 5              # raise to be stricter, lower to widen
 require_relevance: true   # set false to see everything that clears min_score
-qualifying_events:        # which events are strong enough to qualify alone
-  - Acquisition_Signal
-  - Award
-  - Protest
-  - Policy_Regulation
+exclude_keywords:         # hard-drop these whole words (add as you spot noise)
+  - "college football"
+  - "Old Navy"
+  - "telethon"
 ```
 
-Each run prints how many items the gate dropped, so you can see the effect and
-adjust. If you find real items being filtered out, add the missing agency,
-program, or company term to the relevant group in `config.yaml`.
+Each run prints how many items the gate dropped (`Relevance gate: kept N of M
+...`), so you can see the effect. If a real item ever gets filtered out, add the
+missing agency, program, or company term to the relevant group — and note that
+highly ambiguous acronyms (e.g. bare `NSW`, `MDA`, `DHA`, `BPA`) were removed or
+replaced with full names to prevent exactly this kind of collision.
 
 ## Company / competitor watchlist
 
