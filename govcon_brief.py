@@ -415,6 +415,9 @@ def render_html(items: list[Item], config: dict, out_path: Path) -> None:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>{esc(b["title"])}</title>
 <style>
 body{{font-family:Arial,Helvetica,sans-serif;background:#f5f6f8;color:#17202a;margin:0}}
