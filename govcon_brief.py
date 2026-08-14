@@ -568,6 +568,11 @@ def main() -> int:
     # Audit summary to the console / Actions build log.
     print(f"Filter: kept {len(items)} of {scored_total} items "
           f"(dropped {len(dropped)}).")
+    if items and config["brief"].get("log_kept", True):
+        print("Kept items (what appears in the brief):")
+        for x in items:
+            tags = "/".join(x.agencies + x.companies) or "-"
+            print(f"  score {x.score:>2} [{tags}] {x.title[:80]}")
     if dropped and config["brief"].get("log_dropped", True):
         tally: dict[str, int] = {}
         for _, reason in dropped:
