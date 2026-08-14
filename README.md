@@ -62,6 +62,45 @@ These items are pre-tagged as `Protest` events and receive the `gao.gov`
 source boost. If GAO changes the feed path, update the URL here — no code
 change is required.
 
+## Keeping the brief on-topic
+
+Two mechanisms keep sports, consumer tech, and generic business stories out:
+
+1. **Whole-word keyword matching.** Keywords match only as complete tokens, so
+   acronyms never match inside unrelated words — `SOF` no longer matches
+   "**sof**tware", `AI` no longer matches "tr**ai**ning", `FAR` no longer
+   matches "D**FAR**S", and `PEO` no longer matches "**peo**ple".
+
+2. **Relevance gate** (`require_relevance: true`). After scoring, an item is
+   kept only if it genuinely touches the mission — it must have at least one of:
+
+   - a tracked **agency** match (Navy, Army, DHS, …),
+   - a **watchlist company** match,
+   - a **qualifying event** (`qualifying_events`, default: Acquisition_Signal,
+     Award, Protest, Policy_Regulation), or
+   - an authoritative **`.gov` / `.mil` source**.
+
+   Capability keywords (engineering, software, AI) and soft events
+   (industry moves, budgets) add score and context but **cannot qualify an item
+   on their own** — that is what previously let a sports trade or an AI product
+   launch through on recency alone.
+
+Tuning knobs in `config.yaml` under `brief`:
+
+```yaml
+min_score: 5              # raise to be stricter, lower to widen
+require_relevance: true   # set false to see everything that clears min_score
+qualifying_events:        # which events are strong enough to qualify alone
+  - Acquisition_Signal
+  - Award
+  - Protest
+  - Policy_Regulation
+```
+
+Each run prints how many items the gate dropped, so you can see the effect and
+adjust. If you find real items being filtered out, add the missing agency,
+program, or company term to the relevant group in `config.yaml`.
+
 ## Company / competitor watchlist
 
 `company_groups` in `config.yaml` scores and tags stories that name primes,

@@ -3,8 +3,20 @@ brief:
   lookback_hours: 36
   max_items: 45
   top_items: 10
-  min_score: 2
+  min_score: 5
   output_dir: "output"
+
+  # Keep the brief on federal contracting. When true, an item is dropped unless
+  # it touches a tracked agency, a watchlist company, one of the qualifying
+  # events below, or an authoritative .gov/.mil source. This is what filters out
+  # sports, consumer tech, and generic business stories. Set false to see
+  # everything that clears min_score.
+  require_relevance: true
+  qualifying_events:
+    - Acquisition_Signal
+    - Award
+    - Protest
+    - Policy_Regulation
 
 # EPS-wide mission map. Add/remove terms without changing Python.
 agency_groups:
@@ -47,6 +59,8 @@ agency_groups:
     weight: 4
     keywords:
       - "Department of Defense"
+      - "DoD"
+      - "Pentagon"
       - "Defense Logistics Agency"
       - "DLA"
       - "DISA"

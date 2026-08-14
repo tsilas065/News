@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import html
 import os
@@ -68,6 +69,20 @@ def clean_text(value: str) -> str:
     value = re.sub(r"<[^>]+>", " ", value or "")
     value = html.unescape(value)
     return re.sub(r"\s+", " ", value).strip()
+
+
+@functools.lru_cache(maxsize=8192)
+def _kw_pattern(kw_lower: str) -> re.Pattern:
+    # Match a keyword only as a whole token, so acronyms like "SOF", "AI" or
+    # "PEO" don't match inside "software", "training" or "people".
+    return re.compile(r"(?<![a-z0-9])" + re.escape(kw_lower) + r"(?![a-z0-9])")
+
+
+def keyword_in(text_lower: str, keyword: str) -> bool:
+    kw = str(keyword).lower().strip()
+    if not kw:
+        return False
+    return _kw_pattern(kw).search(text_lower) is not None
 
 
 def load_config(path: Path) -> dict:
@@ -253,7 +268,7 @@ def score_items(items: list[Item], config: dict) -> list[Item]:
         text = f"{item.title} {item.summary}".lower()
         matches = []
         for kw in group_cfg.get("keywords", []):
-            if str(kw).lower() in text:
+            if keyword_in(text, kw):
                 matches.append(str(kw))
         if matches:
             if group_name not in bucket:
@@ -291,6 +306,25 @@ def score_items(items: list[Item], config: dict) -> list[Item]:
         item.score = score
 
     return sorted(items, key=lambda x: (x.score, x.published), reverse=True)
+
+
+def is_relevant(item: Item, qualifying_events: set[str]) -> bool:
+    """Gate that keeps the brief focused on federal contracting.
+
+    An item qualifies only if it actually touches the mission: a tracked
+    agency, a watchlist company, a hard contracting event (award, protest,
+    acquisition signal, policy/regulation), or an authoritative government
+    source. Generic capability or industry/budget keywords alone are not
+    enough — that is what let sports and consumer-tech stories through.
+    """
+    if item.agencies or item.companies:
+        return True
+    if any(ev in qualifying_events for ev in item.events):
+        return True
+    domain = item.domain
+    if domain.endswith(".gov") or domain.endswith(".mil"):
+        return True
+    return False
 
 
 def within_lookback(items: Iterable[Item], hours: int) -> list[Item]:
@@ -449,6 +483,16 @@ def main() -> int:
     items = dedupe(items)
     items = score_items(items, config)
     items = [x for x in items if x.score >= min_score]
+
+    if config["brief"].get("require_relevance", True):
+        qualifying = set(config["brief"].get(
+            "qualifying_events",
+            ["Acquisition_Signal", "Award", "Protest", "Policy_Regulation"],
+        ))
+        before = len(items)
+        items = [x for x in items if is_relevant(x, qualifying)]
+        print(f"Relevance gate: kept {len(items)} of {before} scored items "
+              f"(dropped {before - len(items)} off-mission).")
 
     out_dir = Path(config["brief"].get("output_dir", "output"))
     out_dir.mkdir(parents=True, exist_ok=True)
