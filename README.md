@@ -99,11 +99,37 @@ exclude_keywords:         # hard-drop these whole words (add as you spot noise)
   - "telethon"
 ```
 
-Each run prints how many items the gate dropped (`Relevance gate: kept N of M
-...`), so you can see the effect. If a real item ever gets filtered out, add the
-missing agency, program, or company term to the relevant group — and note that
-highly ambiguous acronyms (e.g. bare `NSW`, `MDA`, `DHA`, `BPA`) were removed or
-replaced with full names to prevent exactly this kind of collision.
+Each run prints how many items the gate dropped, so you can see the effect. If a
+real item ever gets filtered out, add the missing agency, program, or company
+term to the relevant group — and note that highly ambiguous acronyms (e.g. bare
+`NSW`, `MDA`, `DHA`, `BPA`, `FAR`) were removed or replaced with full names/
+phrases to prevent exactly this kind of collision.
+
+### Auditing what was filtered out
+
+With `log_dropped: true` (default), every run tells you exactly what it removed
+and why — so you can spot-check the gate instead of catching leaks by eye:
+
+- **Console / Actions log:** a tally by reason plus a sample of the highest-
+  scoring dropped items, e.g.
+
+  ```
+  Filter: kept 12 of 137 items (dropped 125).
+  Dropped by reason:
+     118  below min_score
+       6  no mission signal (no agency, company, or .gov/.mil source)
+       1  excluded keyword: Old Navy
+  Sample of dropped items (top 15 by score):
+    - [excluded keyword: Old Navy] Old Navy launches fall collection ...
+  ```
+
+- **Full file:** `output/EPS_GovCon_Dropped_YYYY-MM-DD.md` lists every dropped
+  item with its reason and score.
+
+When you see an off-topic item in the brief, find it in this list — the reason
+tells you which keyword let it in (or that it slipped through on a real agency
+name, meaning it needs an `exclude_keywords` entry). Set `log_dropped: false` to
+turn the audit trail off.
 
 ## Company / competitor watchlist
 

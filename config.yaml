@@ -6,6 +6,12 @@ brief:
   min_score: 5
   output_dir: "output"
 
+  # Audit trail. When true, each run prints why items were filtered out and
+  # writes output/EPS_GovCon_Dropped_YYYY-MM-DD.md with the full list, so you
+  # can see exactly what the gate removed and which keyword did it.
+  log_dropped: true
+  log_dropped_preview: 15   # how many dropped items to sample in the console
+
   # Keep the brief on federal contracting. When true, an item is kept only if it
   # names a tracked agency, a watchlist company, or comes from a .gov/.mil
   # source. Event/capability keywords (awarded, software, AI, ...) add score and

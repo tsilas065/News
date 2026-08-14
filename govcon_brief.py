@@ -308,8 +308,8 @@ def score_items(items: list[Item], config: dict) -> list[Item]:
     return sorted(items, key=lambda x: (x.score, x.published), reverse=True)
 
 
-def is_relevant(item: Item, exclude_terms: Iterable[str]) -> bool:
-    """Gate that keeps the brief focused on federal contracting.
+def relevance_verdict(item: Item, exclude_terms: Iterable[str]) -> tuple[bool, str]:
+    """Decide whether an item belongs in the brief, and explain why.
 
     Two stages:
 
@@ -321,17 +321,24 @@ def is_relevant(item: Item, exclude_terms: Iterable[str]) -> bool:
        source. Event and capability keywords add score and tags but are too
        ambiguous to qualify a story on their own (e.g. "awarded", "BPA"),
        so they never pass the gate by themselves.
+
+    Returns (keep, reason).
     """
     text = f"{item.title} {item.summary}".lower()
     for term in exclude_terms:
         if keyword_in(text, term):
-            return False
+            return False, f"excluded keyword: {term}"
     if item.agencies or item.companies:
-        return True
+        signal = ", ".join(item.agencies + item.companies)
+        return True, f"mission signal: {signal}"
     domain = item.domain
     if domain.endswith(".gov") or domain.endswith(".mil"):
-        return True
-    return False
+        return True, f"authoritative source: {domain}"
+    return False, "no mission signal (no agency, company, or .gov/.mil source)"
+
+
+def is_relevant(item: Item, exclude_terms: Iterable[str]) -> bool:
+    return relevance_verdict(item, exclude_terms)[0]
 
 
 def within_lookback(items: Iterable[Item], hours: int) -> list[Item]:
@@ -466,6 +473,32 @@ def send_email(subject: str, html_body: str) -> bool:
     return True
 
 
+def write_dropped_log(dropped: list[tuple[Item, str]], out_path: Path) -> None:
+    """Write every filtered-out item with its reason, for auditing the gate."""
+    lines = [
+        "# Dropped items (filtered out of the brief)",
+        "",
+        f"Generated: {datetime.now().astimezone().strftime('%Y-%m-%d %I:%M %p %Z')}",
+        f"Total dropped: {len(dropped)}",
+        "",
+    ]
+    # Group by reason label (the part before any colon) for a quick tally.
+    tally: dict[str, int] = {}
+    for _, reason in dropped:
+        label = reason.split(":")[0].strip()
+        tally[label] = tally.get(label, 0) + 1
+    lines.append("## Why items were dropped")
+    lines.append("")
+    for label, n in sorted(tally.items(), key=lambda kv: kv[1], reverse=True):
+        lines.append(f"- {n} — {label}")
+    lines.append("")
+    lines.append("## Items")
+    lines.append("")
+    for item, reason in sorted(dropped, key=lambda t: t[0].score, reverse=True):
+        lines.append(f"- [{reason}] (score {item.score}) {item.title} — {item.source}")
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="EPS-wide GovCon morning intelligence aggregator")
     ap.add_argument("--config", default="config.yaml")
@@ -489,14 +522,41 @@ def main() -> int:
     items = within_lookback(items, lookback)
     items = dedupe(items)
     items = score_items(items, config)
-    items = [x for x in items if x.score >= min_score]
 
-    if config["brief"].get("require_relevance", True):
-        exclude = config["brief"].get("exclude_keywords", []) or []
-        before = len(items)
-        items = [x for x in items if is_relevant(x, exclude)]
-        print(f"Relevance gate: kept {len(items)} of {before} scored items "
-              f"(dropped {before - len(items)} off-mission).")
+    require_relevance = config["brief"].get("require_relevance", True)
+    exclude = config["brief"].get("exclude_keywords", []) or []
+    scored_total = len(items)
+
+    kept: list[Item] = []
+    dropped: list[tuple[Item, str]] = []
+    for x in items:
+        if x.score < min_score:
+            dropped.append((x, f"below min_score: {x.score} < {min_score}"))
+            continue
+        if require_relevance:
+            ok, reason = relevance_verdict(x, exclude)
+            if not ok:
+                dropped.append((x, reason))
+                continue
+        kept.append(x)
+    items = kept
+
+    # Audit summary to the console / Actions build log.
+    print(f"Filter: kept {len(items)} of {scored_total} items "
+          f"(dropped {len(dropped)}).")
+    if dropped and config["brief"].get("log_dropped", True):
+        tally: dict[str, int] = {}
+        for _, reason in dropped:
+            label = reason.split(":")[0].strip()
+            tally[label] = tally.get(label, 0) + 1
+        print("Dropped by reason:")
+        for label, n in sorted(tally.items(), key=lambda kv: kv[1], reverse=True):
+            print(f"  {n:>4}  {label}")
+        preview = int(config["brief"].get("log_dropped_preview", 15))
+        if preview > 0:
+            print(f"Sample of dropped items (top {preview} by score):")
+            for item, reason in sorted(dropped, key=lambda t: t[0].score, reverse=True)[:preview]:
+                print(f"  - [{reason}] {item.title[:80]}")
 
     out_dir = Path(config["brief"].get("output_dir", "output"))
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -508,6 +568,10 @@ def main() -> int:
 
     print(f"Wrote {html_path}")
     print(f"Wrote {md_path}")
+    if dropped and config["brief"].get("log_dropped", True):
+        dropped_path = out_dir / f"EPS_GovCon_Dropped_{stamp}.md"
+        write_dropped_log(dropped, dropped_path)
+        print(f"Wrote {dropped_path}")
     print(f"Selected {len(items)} relevant items.")
 
     if args.email:
