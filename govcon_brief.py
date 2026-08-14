@@ -34,6 +34,7 @@ class Item:
     summary: str = ""
     score: int = 0
     agencies: list[str] = field(default_factory=list)
+    companies: list[str] = field(default_factory=list)
     capabilities: list[str] = field(default_factory=list)
     events: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
@@ -181,6 +182,47 @@ def sam_items(config: dict) -> list[Item]:
     return items
 
 
+def gao_protest_items(config: dict) -> list[Item]:
+    """Pull GAO bid-protest decisions directly from GAO RSS feeds.
+
+    GAO publishes protest decisions as RSS. Feed URLs are configurable so the
+    endpoint can be corrected without code changes. Items are pre-tagged as
+    Protest events; scoring still applies agency/capability/company weights and
+    the gao.gov source boost.
+    """
+    gcfg = config.get("gao_protests", {})
+    if not gcfg.get("enabled", False):
+        return []
+
+    items: list[Item] = []
+    for feed_url in gcfg.get("feeds", []):
+        try:
+            feed = feedparser.parse(feed_url, agent=UA)
+        except Exception as exc:
+            print(f"[warn] GAO feed failed for {feed_url!r}: {exc}", file=sys.stderr)
+            continue
+        if getattr(feed, "bozo", 0) and not feed.entries:
+            print(f"[warn] GAO feed returned no entries: {feed_url}", file=sys.stderr)
+            continue
+        for e in feed.entries:
+            title = clean_text(e.get("title", ""))
+            link = e.get("link", "")
+            summary = clean_text(e.get("summary", "") or e.get("description", ""))
+            pub = utc(e.get("published") or e.get("updated"))
+            if title and link:
+                item = Item(
+                    title=title,
+                    url=link,
+                    source="GAO Bid Protests",
+                    published=pub,
+                    summary=summary,
+                )
+                item.events.append("Protest")
+                item.reasons.append("GAO bid-protest docket")
+                items.append(item)
+    return items
+
+
 def norm_title(title: str) -> str:
     t = title.lower()
     t = re.sub(r"\s+-\s+[^-]{2,50}$", "", t)
@@ -214,7 +256,8 @@ def score_items(items: list[Item], config: dict) -> list[Item]:
             if str(kw).lower() in text:
                 matches.append(str(kw))
         if matches:
-            bucket.append(group_name)
+            if group_name not in bucket:
+                bucket.append(group_name)
             item.reasons.append(f"{group_name}: {', '.join(matches[:3])}")
             return int(group_cfg.get("weight", 1))
         return 0
@@ -223,6 +266,8 @@ def score_items(items: list[Item], config: dict) -> list[Item]:
         score = 0
         for name, cfg in config.get("agency_groups", {}).items():
             score += apply_group(item, name, cfg, item.agencies)
+        for name, cfg in config.get("company_groups", {}).items():
+            score += apply_group(item, name, cfg, item.companies)
         for name, cfg in config.get("capability_groups", {}).items():
             score += apply_group(item, name, cfg, item.capabilities)
         for name, cfg in config.get("event_groups", {}).items():
@@ -271,7 +316,7 @@ def render_html(items: list[Item], config: dict, out_path: Path) -> None:
     def card(item: Item, rank: int | None = None) -> str:
         rank_html = f'<span class="rank">{rank}</span>' if rank else ""
         summary = item.summary[:550] + ("…" if len(item.summary) > 550 else "")
-        tags = tag_html(item.agencies + item.capabilities + item.events)
+        tags = tag_html(item.agencies + item.companies + item.capabilities + item.events)
         return f"""
         <article class="card">
           <div class="headline">{rank_html}<a href="{esc(item.url)}">{esc(item.title)}</a></div>
@@ -291,6 +336,8 @@ def render_html(items: list[Item], config: dict, out_path: Path) -> None:
         "DHS": sum("Homeland_Security" in x.agencies for x in items),
         "Policy": sum("Policy_Regulation" in x.events for x in items),
         "Awards": sum("Award" in x.events for x in items),
+        "Protests": sum("Protest" in x.events for x in items),
+        "Watchlist": sum(bool(x.companies) for x in items),
     }
     chips = "".join(f'<div class="metric"><b>{v}</b><span>{esc(k)}</span></div>' for k, v in counts.items())
 
@@ -342,7 +389,7 @@ def render_markdown(items: list[Item], config: dict, out_path: Path) -> None:
         "",
     ]
     for idx, i in enumerate(items[:int(b.get("max_items", 45))], 1):
-        tags = ", ".join(i.agencies + i.capabilities + i.events)
+        tags = ", ".join(i.agencies + i.companies + i.capabilities + i.events)
         lines += [
             f"{idx}. **[{i.title}]({i.url})**",
             f"   - Source: {i.source} | Relevance: {i.score} | Published: {i.published.astimezone().isoformat(timespec='minutes')}",
@@ -395,6 +442,8 @@ def main() -> int:
     items += federal_register_items(config)
     print("Collecting SAM.gov..." if config.get("sam", {}).get("enabled") else "SAM.gov collector disabled.")
     items += sam_items(config)
+    print("Collecting GAO bid protests..." if config.get("gao_protests", {}).get("enabled") else "GAO protest collector disabled.")
+    items += gao_protest_items(config)
 
     items = within_lookback(items, lookback)
     items = dedupe(items)

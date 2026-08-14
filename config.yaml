@@ -88,6 +88,30 @@ agency_groups:
       - "Department of Transportation"
       - "Department of Veterans Affairs"
 
+# Named-entity watchlist. Score and tag stories that mention primes,
+# competitors, teammates, or incumbents EPS cares about. Edit freely —
+# these are examples, not an endorsement or a confirmed team.
+company_groups:
+  Teammates_Incumbents:
+    weight: 4
+    keywords:
+      - "SimVentions"
+      - "Serco"
+      - "Alion"
+  Primes_Competitors:
+    weight: 3
+    keywords:
+      - "Leidos"
+      - "Booz Allen"
+      - "SAIC"
+      - "General Dynamics"
+      - "Peraton"
+      - "CACI"
+      - "ManTech"
+      - "Huntington Ingalls"
+      - "BAE Systems"
+      - "L3Harris"
+
 capability_groups:
   Engineering_Prototyping:
     weight: 3
@@ -298,3 +322,11 @@ sam:
   # Enable after setting SAM_API_KEY in environment.
   posted_days: 2
   limit: 100
+
+# GAO bid-protest decisions, pulled straight from GAO's public RSS.
+# If GAO changes the feed path, update the URL here — no code change needed.
+# Items are pre-tagged as Protest events and get the gao.gov source boost.
+gao_protests:
+  enabled: true
+  feeds:
+    - "https://www.gao.gov/rss/bid_protests.xml"

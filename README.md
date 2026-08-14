@@ -46,6 +46,45 @@ The SAM collector is included but **disabled by default**. To use it:
 
 Do not replace this with HTML scraping of SAM.gov.
 
+### 4. GAO bid protests
+Pulls GAO bid-protest decisions directly from GAO's public RSS feed, so
+protests are captured at the source instead of only when news happens to
+report them. Configured under `gao_protests` in `config.yaml`:
+
+```yaml
+gao_protests:
+  enabled: true
+  feeds:
+    - "https://www.gao.gov/rss/bid_protests.xml"
+```
+
+These items are pre-tagged as `Protest` events and receive the `gao.gov`
+source boost. If GAO changes the feed path, update the URL here — no code
+change is required.
+
+## Company / competitor watchlist
+
+`company_groups` in `config.yaml` scores and tags stories that name primes,
+competitors, teammates or incumbents you care about. It works exactly like the
+agency and capability groups:
+
+```yaml
+company_groups:
+  Teammates_Incumbents:
+    weight: 4
+    keywords:
+      - "SimVentions"
+  Primes_Competitors:
+    weight: 3
+    keywords:
+      - "Leidos"
+      - "CACI"
+```
+
+Matched companies appear as tags on each card and drive the **Watchlist**
+metric chip in the dashboard header. The shipped names are examples — edit them
+to reflect your real pursuit landscape.
+
 ## Install
 
 ### Windows PowerShell
@@ -135,13 +174,35 @@ Create a Basic Task:
 0 6 * * 1-5 cd /path/to/eps_govcon_morning_brief && /path/to/.venv/bin/python govcon_brief.py
 ```
 
+### GitHub Actions + GitHub Pages (hosted, no local run)
+
+`.github/workflows/morning-brief.yml` runs the brief on GitHub's runners every
+weekday morning and publishes the dashboard to GitHub Pages, so you get a
+stable URL without running anything locally.
+
+One-time setup:
+
+1. In the repo, go to **Settings → Pages** and set **Source: GitHub Actions**
+   (the workflow attempts to enable this automatically on first run).
+2. Optionally add a **`SAM_API_KEY`** repository secret (Settings → Secrets and
+   variables → Actions) and set `sam.enabled: true` in `config.yaml`.
+3. Trigger a run: **Actions → EPS GovCon Morning Brief → Run workflow**, or wait
+   for the 11:00 UTC weekday schedule.
+
+The published dashboard lives at `https://<your-user>.github.io/<repo>/`
+(for this repo, `https://tsilas065.github.io/News/`). Each run also archives the
+dated `EPS_GovCon_Brief_YYYY-MM-DD.html` / `.md` files alongside `index.html`.
+
+Adjust the schedule by editing the `cron` line in the workflow (it is in UTC;
+`0 11 * * 1-5` is roughly 6–7 a.m. US Eastern).
+
 ## Recommended next upgrades
 
 The starter build is deliberately simple and maintainable. The strongest next additions are:
 
-1. **Company/competitor watchlists** — score named primes, teammates and incumbents.
+1. ~~**Company/competitor watchlists** — score named primes, teammates and incumbents.~~ ✅ Implemented (`company_groups`).
 2. **Program/vehicle watchlists** — SeaPort NxG, GSA MAS, OASIS+, CIO-SP4, Alliant, agency IDIQs, etc.
-3. **GAO protest collector** — dedicated protest docket monitoring.
+3. ~~**GAO protest collector** — dedicated protest docket monitoring.~~ ✅ Implemented (`gao_protests`).
 4. **DoD daily contracts parser** — structured extraction of awards by branch, amount and contractor.
 5. **USAspending integration** — incumbent/award trend context.
 6. **SharePoint/Teams delivery** — post the brief internally.
@@ -158,7 +219,8 @@ The starter build is deliberately simple and maintainable. The strongest next ad
 
 ## Files
 
-- `govcon_brief.py` — collector, deduplication, scoring, report generation, optional email
-- `config.yaml` — EPS-wide agencies, capabilities, event types, queries and weights
+- `govcon_brief.py` — collectors (news, Federal Register, SAM.gov, GAO protests), deduplication, scoring, report generation, optional email
+- `config.yaml` — EPS-wide agencies, companies, capabilities, event types, queries and weights
 - `requirements.txt` — Python dependencies
 - `.env.example` — environment variable names
+- `.github/workflows/morning-brief.yml` — scheduled build + GitHub Pages publish

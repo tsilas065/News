@@ -1,0 +1,78 @@
+name: EPS GovCon Morning Brief
+
+# Generates the brief on GitHub's runners (unfirewalled network) every weekday
+# morning and publishes the HTML dashboard to GitHub Pages. Run it on demand
+# any time from the Actions tab via "Run workflow".
+on:
+  schedule:
+    # 11:00 UTC on Mon-Fri  ->  ~06:00 US Eastern (EST) / 07:00 (EDT).
+    # Adjust the hour for your timezone if needed.
+    - cron: "0 11 * * 1-5"
+  workflow_dispatch:
+
+# Least-privilege token; the pages/id-token scopes are required to deploy.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deploys at once; let a newer run supersede an in-flight one.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate brief
+        env:
+          # Optional. Set as a repository secret to enable the SAM.gov collector
+          # (also flip sam.enabled to true in config.yaml).
+          SAM_API_KEY: ${{ secrets.SAM_API_KEY }}
+        run: python govcon_brief.py
+
+      - name: Assemble Pages site
+        run: |
+          mkdir -p site
+          # Copy every generated brief so dated archives stay reachable.
+          cp output/*.html output/*.md site/ 2>/dev/null || true
+          # Make the newest HTML brief the landing page.
+          latest="$(ls -t output/EPS_GovCon_Brief_*.html | head -n1)"
+          if [ -n "$latest" ]; then
+            cp "$latest" site/index.html
+          else
+            echo "<!doctype html><meta charset=utf-8><p>No brief generated.</p>" > site/index.html
+          fi
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          # Auto-enables Pages (Actions source) on first run if permitted.
+          enablement: true
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
