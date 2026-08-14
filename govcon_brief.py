@@ -346,6 +346,26 @@ def within_lookback(items: Iterable[Item], hours: int) -> list[Item]:
     return [i for i in items if i.published >= cutoff]
 
 
+def build_id() -> str:
+    """Short identifier of the code that produced this brief, so a reader can
+    tell a fresh brief from a stale one. Prefers the CI commit SHA; falls back
+    to the local git HEAD, then "local"."""
+    sha = os.getenv("GITHUB_SHA", "").strip()
+    if sha:
+        return sha[:7]
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return "local"
+
+
 def esc(s: str) -> str:
     return html.escape(s or "", quote=True)
 
@@ -360,6 +380,7 @@ def render_html(items: list[Item], config: dict, out_path: Path) -> None:
     top = items[:top_n]
     rest = items[top_n:int(b.get("max_items", 45))]
     generated = datetime.now().astimezone().strftime("%B %d, %Y at %I:%M %p %Z")
+    build = build_id()
 
     def card(item: Item, rank: int | None = None) -> str:
         rank_html = f'<span class="rank">{rank}</span>' if rank else ""
@@ -415,7 +436,7 @@ footer{{font-size:12px;color:#6b7785;margin:30px 0}}
 </style>
 </head>
 <body><div class="wrap">
-<header><h1>{esc(b["title"])}</h1><div class="sub">Generated {esc(generated)} · EPS-wide federal market awareness</div></header>
+<header><h1>{esc(b["title"])}</h1><div class="sub">Generated {esc(generated)} · build {esc(build)} · EPS-wide federal market awareness</div></header>
 <div class="metrics">{chips}</div>
 <h2>Top Developments</h2>
 {top_html or "<p>No qualifying items in the current window.</p>"}
@@ -431,7 +452,7 @@ def render_markdown(items: list[Item], config: dict, out_path: Path) -> None:
     lines = [
         f"# {b['title']}",
         "",
-        f"Generated: {datetime.now().astimezone().strftime('%Y-%m-%d %I:%M %p %Z')}",
+        f"Generated: {datetime.now().astimezone().strftime('%Y-%m-%d %I:%M %p %Z')} · build {build_id()}",
         "",
         "## Top Developments",
         "",
