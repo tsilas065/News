@@ -374,8 +374,18 @@ sam:
 # Items are pre-tagged as Protest events and get the gao.gov source boost.
 gao_protests:
   enabled: true
+  limit: 20
+  # The collector tries each feed and keeps only bid-protest decisions. GAO does
+  # not publish a stable protest-only RSS path, so several candidates are listed;
+  # correct any that 404 without touching code.
   feeds:
+    - "https://www.gao.gov/rss/legal.xml"
+    - "https://www.gao.gov/rss/bidprotests.xml"
     - "https://www.gao.gov/rss/bid_protests.xml"
+  # If none of the feeds return protest items, discover them via Google News RSS
+  # so the Protests section is never empty. Set false to disable the fallback.
+  news_fallback: true
+  news_query: 'GAO "bid protest" (sustained OR denied OR dismissed OR decision)'
 
 # USAspending.gov (public FPDS award/spending data — no API key needed).
 # Pulls the largest recent prime CONTRACT awards for the agencies below, giving

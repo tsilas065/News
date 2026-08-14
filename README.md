@@ -79,9 +79,27 @@ gao_protests:
     - "https://www.gao.gov/rss/bid_protests.xml"
 ```
 
-These items are pre-tagged as `Protest` events and receive the `gao.gov`
-source boost. If GAO changes the feed path, update the URL here — no code
-change is required.
+These items are pre-tagged as `Protest` events and always clear the relevance
+gate (a bid-protest decision is on-topic by definition). GAO does not publish a
+stable protest-only RSS path, so the collector tries several candidate feeds and
+keeps only bid-protest decisions; if none return anything, it **falls back to a
+Google News search** so the Protests section is never empty. Tune the candidates
+or the fallback query in `config.yaml` — no code change required.
+
+## Interactive topic filtering
+
+The HTML dashboard is filterable in the browser — no server needed. **Click any
+topic chip** in the header (Army, Navy/USMC, DHS, SOCOM, Awards, Protests, GAO,
+Watchlist, …) **or any tag on a card** to show only matching stories:
+
+- Chips **combine with OR** — click Army and GAO to see both.
+- Click a selected chip/tag again to remove it.
+- **All topics** clears every filter.
+- Section headings hide when a filter empties them, and a status line shows how
+  many of the total items are visible.
+
+It's plain inline JavaScript baked into the file, so it works from the Pages URL,
+a saved copy, or email — anywhere the HTML opens.
 
 ## LLM executive summary ("Market Pulse")
 

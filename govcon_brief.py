@@ -210,6 +210,23 @@ def gao_protest_items(config: dict) -> list[Item]:
     if not gcfg.get("enabled", False):
         return []
 
+    limit = int(gcfg.get("limit", 20))
+
+    def make_item(title, link, summary, pub) -> Item:
+        item = Item(title=title, url=link, source="GAO Bid Protests",
+                    published=pub, summary=summary)
+        item.events.append("Protest")
+        item.reasons.append("GAO bid-protest decision")
+        return item
+
+    def looks_like_protest(title: str, summary: str) -> bool:
+        # GAO's Legal Products feed also carries appropriations-law items; keep
+        # only bid-protest decisions (by keyword or a B-###### docket number).
+        text = f"{title} {summary}".lower()
+        if "protest" in text or "solicitation" in text:
+            return True
+        return bool(re.search(r"\bb-\d{5,6}", text))
+
     items: list[Item] = []
     for feed_url in gcfg.get("feeds", []):
         try:
@@ -217,26 +234,49 @@ def gao_protest_items(config: dict) -> list[Item]:
         except Exception as exc:
             print(f"[warn] GAO feed failed for {feed_url!r}: {exc}", file=sys.stderr)
             continue
-        if getattr(feed, "bozo", 0) and not feed.entries:
+        entries = getattr(feed, "entries", []) or []
+        if not entries:
             print(f"[warn] GAO feed returned no entries: {feed_url}", file=sys.stderr)
             continue
-        for e in feed.entries:
+        kept = 0
+        for e in entries:
             title = clean_text(e.get("title", ""))
             link = e.get("link", "")
             summary = clean_text(e.get("summary", "") or e.get("description", ""))
-            pub = utc(e.get("published") or e.get("updated"))
-            if title and link:
-                item = Item(
-                    title=title,
-                    url=link,
-                    source="GAO Bid Protests",
-                    published=pub,
-                    summary=summary,
-                )
-                item.events.append("Protest")
-                item.reasons.append("GAO bid-protest docket")
-                items.append(item)
-    return items
+            if not (title and link):
+                continue
+            if not looks_like_protest(title, summary):
+                continue
+            items.append(make_item(title, link, summary,
+                                   utc(e.get("published") or e.get("updated"))))
+            kept += 1
+        if kept:
+            print(f"GAO: {kept} protest items from {feed_url}")
+
+    # Fallback: if no direct GAO feed produced protest items, discover recent
+    # GAO bid-protest decisions via Google News RSS (a reliable aggregator).
+    if not items and gcfg.get("news_fallback", True):
+        query = gcfg.get(
+            "news_query",
+            'GAO "bid protest" (sustained OR denied OR dismissed OR decision)',
+        )
+        q = quote_plus(query)
+        feed_url = f"https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
+        try:
+            feed = feedparser.parse(feed_url, agent=UA)
+            for e in feed.entries[:limit]:
+                title = clean_text(e.get("title", ""))
+                link = e.get("link", "")
+                summary = clean_text(e.get("summary", ""))
+                if title and link:
+                    items.append(make_item(title, link, summary,
+                                           utc(e.get("published") or e.get("updated"))))
+            if items:
+                print(f"GAO: {len(items)} protest items via Google News fallback")
+        except Exception as exc:
+            print(f"[warn] GAO news fallback failed: {exc}", file=sys.stderr)
+
+    return items[:limit]
 
 
 def usaspending_items(config: dict) -> list[Item]:
@@ -411,6 +451,8 @@ def relevance_verdict(item: Item, exclude_terms: Iterable[str]) -> tuple[bool, s
     if item.agencies or item.companies:
         signal = ", ".join(item.agencies + item.companies)
         return True, f"mission signal: {signal}"
+    if (item.source or "").lower().startswith("gao"):
+        return True, "GAO bid-protest source"
     domain = item.domain
     if domain.endswith(".gov") or domain.endswith(".mil"):
         return True, f"authoritative source: {domain}"
@@ -451,7 +493,10 @@ def esc(s: str) -> str:
 
 
 def tag_html(values: list[str]) -> str:
-    return "".join(f'<span class="tag">{esc(v.replace("_", " "))}</span>' for v in values)
+    return "".join(
+        f'<span class="tag" data-f="{esc(v)}">{esc(v.replace("_", " "))}</span>'
+        for v in values
+    )
 
 
 def md_lite_to_html(md: str) -> str:
@@ -496,8 +541,16 @@ def render_html(items: list[Item], config: dict, out_path: Path, summary: str | 
         rank_html = f'<span class="rank">{rank}</span>' if rank else ""
         summary = item.summary[:550] + ("…" if len(item.summary) > 550 else "")
         tags = tag_html(item.agencies + item.companies + item.capabilities + item.events)
+        # Filter tokens: the visible group tags plus a couple of source-derived
+        # ones ("Watchlist" for any company match, "GAO" for GAO protest items).
+        ftokens = list(item.agencies + item.companies + item.capabilities + item.events)
+        if item.companies:
+            ftokens.append("Watchlist")
+        if (item.source or "").lower().startswith("gao"):
+            ftokens.append("GAO")
+        data_f = esc(" ".join(dict.fromkeys(ftokens)))
         return f"""
-        <article class="card">
+        <article class="card" data-f="{data_f}">
           <div class="headline">{rank_html}<a href="{esc(item.url)}">{esc(item.title)}</a></div>
           <div class="meta">{esc(item.source)} · {item.published.astimezone().strftime("%b %d, %I:%M %p")} · Relevance {item.score}</div>
           <div class="summary">{esc(summary)}</div>
@@ -507,18 +560,25 @@ def render_html(items: list[Item], config: dict, out_path: Path, summary: str | 
     top_html = "\n".join(card(x, i + 1) for i, x in enumerate(top))
     rest_html = "\n".join(card(x) for x in rest)
 
-    counts = {
-        "Navy/USMC": sum("Navy_Marine_Corps" in x.agencies for x in items),
-        "Army": sum("Army" in x.agencies for x in items),
-        "Air/Space": sum("Air_Force_Space_Force" in x.agencies for x in items),
-        "SOCOM": sum("SOCOM" in x.agencies for x in items),
-        "DHS": sum("Homeland_Security" in x.agencies for x in items),
-        "Policy": sum("Policy_Regulation" in x.events for x in items),
-        "Awards": sum("Award" in x.events for x in items),
-        "Protests": sum("Protest" in x.events for x in items),
-        "Watchlist": sum(bool(x.companies) for x in items),
-    }
-    chips = "".join(f'<div class="metric"><b>{v}</b><span>{esc(k)}</span></div>' for k, v in counts.items())
+    # (label, filter token, count). Clicking a chip filters the cards below.
+    chip_defs = [
+        ("Navy/USMC", "Navy_Marine_Corps", sum("Navy_Marine_Corps" in x.agencies for x in items)),
+        ("Army", "Army", sum("Army" in x.agencies for x in items)),
+        ("Air/Space", "Air_Force_Space_Force", sum("Air_Force_Space_Force" in x.agencies for x in items)),
+        ("SOCOM", "SOCOM", sum("SOCOM" in x.agencies for x in items)),
+        ("DHS", "Homeland_Security", sum("Homeland_Security" in x.agencies for x in items)),
+        ("Policy", "Policy_Regulation", sum("Policy_Regulation" in x.events for x in items)),
+        ("Awards", "Award", sum("Award" in x.events for x in items)),
+        ("Protests", "Protest", sum("Protest" in x.events for x in items)),
+        ("GAO", "GAO", sum((x.source or "").lower().startswith("gao") for x in items)),
+        ("Watchlist", "Watchlist", sum(bool(x.companies) for x in items)),
+    ]
+    all_chip = ('<button class="metric filter-all active" id="filter-all" type="button">'
+                f'<b>{len(items)}</b><span>All topics</span></button>')
+    chips = all_chip + "".join(
+        f'<button class="metric" type="button" data-f="{esc(token)}"><b>{v}</b><span>{esc(k)}</span></button>'
+        for k, token, v in chip_defs if v
+    )
 
     summary_html = ""
     if summary:
@@ -543,8 +603,11 @@ body{{font-family:Arial,Helvetica,sans-serif;background:#f5f6f8;color:#17202a;ma
 header{{background:#17202a;color:white;padding:28px;border-radius:14px}}
 h1{{margin:0 0 6px;font-size:28px}} .sub{{opacity:.8}}
 .metrics{{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}}
-.metric{{background:white;border:1px solid #ddd;border-radius:10px;padding:10px 14px;min-width:90px}}
+.metric{{background:white;border:1px solid #ddd;border-radius:10px;padding:10px 14px;min-width:90px;cursor:pointer;font:inherit;text-align:left;color:inherit}}
+.metric:hover{{border-color:#163a5f}}
+.metric.active{{outline:2px solid #163a5f;background:#eef4fb}}
 .metric b{{display:block;font-size:22px}} .metric span{{font-size:12px;color:#5d6d7e}}
+.fstatus{{font-size:12px;color:#5d6d7e;margin:0 0 6px}}
 h2{{margin-top:28px}}
 .card{{background:white;border:1px solid #e1e4e8;border-radius:12px;padding:16px 18px;margin:12px 0;box-shadow:0 1px 2px rgba(0,0,0,.03)}}
 .headline{{font-size:18px;font-weight:700;line-height:1.35;display:flex;gap:10px}}
@@ -552,7 +615,9 @@ h2{{margin-top:28px}}
 .rank{{background:#17202a;color:white;border-radius:6px;min-width:28px;height:28px;text-align:center;line-height:28px}}
 .meta{{font-size:12px;color:#6b7785;margin:7px 0}}
 .summary{{font-size:14px;line-height:1.5}}
-.tag{{display:inline-block;background:#edf2f7;border-radius:999px;padding:4px 8px;margin:7px 5px 0 0;font-size:11px}}
+.tag{{display:inline-block;background:#edf2f7;border-radius:999px;padding:4px 8px;margin:7px 5px 0 0;font-size:11px;cursor:pointer}}
+.tag:hover{{background:#d6e2f0}}
+.tag.active{{background:#163a5f;color:white}}
 .pulse{{background:#eef4fb;border:1px solid #cfe0f2;border-left:5px solid #163a5f;border-radius:12px;padding:16px 20px;margin:18px 0}}
 .pulse h2{{margin:0 0 6px;font-size:20px;color:#163a5f}}
 .pulse-badge{{display:inline-block;background:#163a5f;color:white;font-size:11px;border-radius:999px;padding:3px 10px;margin-bottom:8px}}
@@ -564,13 +629,65 @@ footer{{font-size:12px;color:#6b7785;margin:30px 0}}
 <body><div class="wrap">
 <header><h1>{esc(b["title"])}</h1><div class="sub">Generated {esc(generated)} · build {esc(build)} · EPS-wide federal market awareness</div></header>
 <div class="metrics">{chips}</div>
+<div id="filter-status" class="fstatus"></div>
 {summary_html}
 <h2>Top Developments</h2>
 {top_html or "<p>No qualifying items in the current window.</p>"}
 <h2>More Worth Knowing</h2>
 {rest_html or "<p>No additional qualifying items.</p>"}
-<footer>Automated intelligence aid. Verify material facts at the linked primary source before capture, proposal, legal, or compliance decisions.</footer>
-</div></body></html>"""
+<footer>Automated intelligence aid. Verify material facts at the linked primary source before capture, proposal, legal, or compliance decisions.<br>Tip: click any topic chip or card tag to filter. Click again to remove it; combine several to widen (OR). "All topics" clears.</footer>
+</div>
+<script>
+(function() {{
+  var active = new Set();
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.card'));
+  var status = document.getElementById('filter-status');
+
+  function apply() {{
+    var visible = 0;
+    cards.forEach(function(c) {{
+      var toks = (c.getAttribute('data-f') || '').split(' ');
+      var show = active.size === 0 || toks.some(function(t) {{ return active.has(t); }});
+      c.style.display = show ? '' : 'none';
+      if (show) visible++;
+    }});
+    document.querySelectorAll('[data-f]').forEach(function(el) {{
+      if (el.classList.contains('card')) return;
+      el.classList.toggle('active', active.has(el.getAttribute('data-f')));
+    }});
+    var allBtn = document.getElementById('filter-all');
+    if (allBtn) allBtn.classList.toggle('active', active.size === 0);
+    // Hide section headings that have no visible cards under them.
+    document.querySelectorAll('h2').forEach(function(h) {{
+      var any = false, n = h.nextElementSibling;
+      while (n && n.tagName !== 'H2') {{
+        if (n.classList && n.classList.contains('card') && n.style.display !== 'none') any = true;
+        n = n.nextElementSibling;
+      }}
+      h.style.display = (active.size === 0 || any) ? '' : 'none';
+    }});
+    if (status) {{
+      status.textContent = active.size
+        ? ('Showing ' + visible + ' of ' + cards.length + ' — filtering: '
+           + Array.from(active).map(function(s) {{ return s.replace(/_/g, ' '); }}).join(', '))
+        : '';
+    }}
+  }}
+
+  function toggle(tok) {{
+    if (!tok) return;
+    if (active.has(tok)) active.delete(tok); else active.add(tok);
+    apply();
+  }}
+
+  document.addEventListener('click', function(ev) {{
+    if (ev.target.closest('#filter-all')) {{ active.clear(); apply(); return; }}
+    var el = ev.target.closest('[data-f]');
+    if (el && !el.classList.contains('card')) {{ ev.preventDefault(); toggle(el.getAttribute('data-f')); }}
+  }});
+}})();
+</script>
+</body></html>"""
     out_path.write_text(doc, encoding="utf-8")
 
 
