@@ -255,7 +255,11 @@ event_groups:
   Policy_Regulation:
     weight: 4
     keywords:
-      - FAR
+      - Federal Acquisition Regulation
+      - FAR Council
+      - FAR clause
+      - FAR case
+      - FAR rule
       - DFARS
       - acquisition regulation
       - Federal Register
