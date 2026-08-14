@@ -40,6 +40,9 @@ jobs:
           # Optional. Set as a repository secret to enable the SAM.gov collector
           # (also flip sam.enabled to true in config.yaml).
           SAM_API_KEY: ${{ secrets.SAM_API_KEY }}
+          # Optional. Set as a repository secret to enable the LLM executive
+          # summary (llm.enabled is true by default; it skips without this key).
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python govcon_brief.py
 
       - name: Assemble Pages site

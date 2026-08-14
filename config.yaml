@@ -305,6 +305,7 @@ source_priority:
   federalregister.gov: 3
   sam.gov: 3
   gao.gov: 3
+  usaspending.gov: 3
   acquisition.gov: 3
   gsa.gov: 2
   sba.gov: 2
@@ -375,3 +376,29 @@ gao_protests:
   enabled: true
   feeds:
     - "https://www.gao.gov/rss/bid_protests.xml"
+
+# USAspending.gov (public FPDS award/spending data — no API key needed).
+# Pulls the largest recent prime CONTRACT awards for the agencies below, giving
+# the brief real dollar figures: who is winning, how much, for what.
+usaspending:
+  enabled: true
+  lookback_days: 30     # award action window
+  min_amount: 1000000   # ignore awards under this dollar amount ($1M)
+  limit: 15             # top awards per agency, by amount
+  # Awarding toptier agency names, exactly as USAspending labels them.
+  agencies:
+    - "Department of Defense"
+    - "Department of Homeland Security"
+    - "Department of the Navy"
+    - "Department of the Army"
+    - "Department of the Air Force"
+
+# LLM executive summary (optional). Writes a short "market pulse" narrative on
+# top of the filtered signals using the Anthropic API. Requires ANTHROPIC_API_KEY
+# in the environment; skips gracefully if the key is absent. Grounded strictly in
+# the items — the prompt forbids inventing programs, dollar values, or awards.
+llm:
+  enabled: true
+  model: "claude-sonnet-5"   # bump to claude-opus-5 for higher quality at higher cost
+  max_items: 25              # how many top items to feed the model
+  max_tokens: 2000

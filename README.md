@@ -46,7 +46,28 @@ The SAM collector is included but **disabled by default**. To use it:
 
 Do not replace this with HTML scraping of SAM.gov.
 
-### 4. GAO bid protests
+### 4. USAspending.gov (award & spending data)
+Pulls the largest recent prime **contract awards** (FPDS data) for the configured
+agencies straight from the public USAspending.gov API — **no API key required**.
+This is the quantitative backbone of the market view: who is winning, how much,
+and for what. Configured under `usaspending` in `config.yaml`:
+
+```yaml
+usaspending:
+  enabled: true
+  lookback_days: 30
+  min_amount: 1000000        # ignore awards under $1M
+  limit: 15                  # top awards per agency, by amount
+  agencies:
+    - "Department of Defense"
+    - "Department of Homeland Security"
+```
+
+Award items are sourced from `usaspending.gov` (a `.gov` source, so they clear
+the relevance gate), carry real dollar figures, and tag as `Award` events.
+`agencies` must use USAspending's exact toptier agency names.
+
+### 5. GAO bid protests
 Pulls GAO bid-protest decisions directly from GAO's public RSS feed, so
 protests are captured at the source instead of only when news happens to
 report them. Configured under `gao_protests` in `config.yaml`:
@@ -61,6 +82,34 @@ gao_protests:
 These items are pre-tagged as `Protest` events and receive the `gao.gov`
 source boost. If GAO changes the feed path, update the URL here — no code
 change is required.
+
+## LLM executive summary ("Market Pulse")
+
+When `llm.enabled` is true **and** `ANTHROPIC_API_KEY` is set, each run adds a
+short, written **Market Pulse** at the top of the dashboard — a GovWin-style
+synthesis of the day's filtered signals (opportunities, awards, policy,
+competitive moves), using the Anthropic API.
+
+```yaml
+llm:
+  enabled: true
+  model: "claude-sonnet-5"   # bump to claude-opus-5 for higher quality
+  max_items: 25
+  max_tokens: 2000
+```
+
+Guardrails:
+
+- **Grounded only in the filtered items.** The prompt forbids inventing
+  programs, dollar values, agencies, or awards — the summary rides on top of the
+  deterministic filter, it doesn't add new sources.
+- **Skips gracefully.** No key, no `anthropic` package, a request failure, or a
+  model refusal all just skip the summary — the rest of the brief still renders.
+- **Labeled and escaped.** The box is marked *AI-generated · verify at source*,
+  and model output is HTML-escaped before rendering.
+
+Set the key locally (`export ANTHROPIC_API_KEY=...`) or, for GitHub Actions, add
+an `ANTHROPIC_API_KEY` repository secret (the workflow already passes it through).
 
 ## Keeping the brief on-topic
 
@@ -288,10 +337,10 @@ The starter build is deliberately simple and maintainable. The strongest next ad
 2. **Program/vehicle watchlists** — SeaPort NxG, GSA MAS, OASIS+, CIO-SP4, Alliant, agency IDIQs, etc.
 3. ~~**GAO protest collector** — dedicated protest docket monitoring.~~ ✅ Implemented (`gao_protests`).
 4. **DoD daily contracts parser** — structured extraction of awards by branch, amount and contractor.
-5. **USAspending integration** — incumbent/award trend context.
+5. ~~**USAspending integration** — incumbent/award trend context.~~ ✅ Implemented (`usaspending`).
 6. **SharePoint/Teams delivery** — post the brief internally.
 7. **Feedback learning** — a "useful/not useful" file that automatically tunes ranking.
-8. **LLM executive summary** — optional AI-generated "Why EPS should care" notes after the deterministic filters have reduced noise.
+8. ~~**LLM executive summary** — optional AI-generated notes after the deterministic filters have reduced noise.~~ ✅ Implemented (`llm`).
 
 ## Security / compliance notes
 

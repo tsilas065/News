@@ -24,6 +24,7 @@ from dateutil import parser as dtparser
 UA = "EPS-GovCon-Morning-Brief/1.0 (+internal business intelligence)"
 FR_API = "https://www.federalregister.gov/api/v1/documents.json"
 SAM_API = "https://api.sam.gov/opportunities/v2/search"
+USASPENDING_API = "https://api.usaspending.gov/api/v2/search/spending_by_award/"
 
 
 @dataclass
@@ -238,6 +239,85 @@ def gao_protest_items(config: dict) -> list[Item]:
     return items
 
 
+def usaspending_items(config: dict) -> list[Item]:
+    """Pull recent, high-value prime contract awards from the public
+    USAspending.gov API (FPDS data) for the configured awarding agencies.
+
+    This is the quantitative backbone of the market view: who is winning, how
+    much, and for what. No API key required. Items are sourced from
+    usaspending.gov (a .gov source, so they clear the relevance gate) and
+    phrased so they tag as Award events.
+    """
+    ucfg = config.get("usaspending", {})
+    if not ucfg.get("enabled", False):
+        return []
+
+    now = datetime.now(timezone.utc)
+    days = int(ucfg.get("lookback_days", 30))
+    start = (now - timedelta(days=days)).date().isoformat()
+    end = now.date().isoformat()
+    min_amount = float(ucfg.get("min_amount", 0) or 0)
+    limit = int(ucfg.get("limit", 25))
+    agencies = ucfg.get("agencies", []) or []
+
+    fields = [
+        "Award ID", "Recipient Name", "Award Amount", "Description",
+        "Awarding Agency", "Awarding Sub Agency", "Start Date", "Award Type",
+    ]
+
+    items: list[Item] = []
+    # One query per agency keeps each result set focused and within API limits.
+    queries = [{"name": a} for a in agencies] or [{"name": None}]
+    for q in queries:
+        filters: dict = {
+            "time_period": [{"start_date": start, "end_date": end}],
+            "award_type_codes": ["A", "B", "C", "D"],  # definitive contracts
+        }
+        if q["name"]:
+            filters["agencies"] = [
+                {"type": "awarding", "tier": "toptier", "name": q["name"]}
+            ]
+        payload = {
+            "filters": filters,
+            "fields": fields,
+            "sort": "Award Amount",
+            "order": "desc",
+            "limit": limit,
+            "page": 1,
+        }
+        try:
+            r = requests.post(USASPENDING_API, json=payload,
+                              headers={"User-Agent": UA}, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+        except Exception as exc:
+            label = q["name"] or "all agencies"
+            print(f"[warn] USAspending query failed for {label!r}: {exc}", file=sys.stderr)
+            continue
+
+        for o in data.get("results", []):
+            try:
+                amount = float(o.get("Award Amount") or 0)
+            except (TypeError, ValueError):
+                amount = 0.0
+            if amount < min_amount:
+                continue
+            recipient = clean_text(o.get("Recipient Name") or "Unknown recipient")
+            agency = clean_text(o.get("Awarding Agency") or (q["name"] or ""))
+            sub = clean_text(o.get("Awarding Sub Agency") or "")
+            gid = o.get("generated_internal_id") or ""
+            url = f"https://www.usaspending.gov/award/{gid}/" if gid else "https://www.usaspending.gov"
+            # Phrase so it reads as, and tags as, an award.
+            amt = f"${amount:,.0f}" if amount else "amount N/A"
+            title = f"{recipient}: {amt} contract award — {agency}"
+            desc = clean_text(o.get("Description") or "")
+            summary = " | ".join(filter(None, [agency, sub, desc]))
+            pub = utc(o.get("Start Date"))
+            items.append(Item(title=title, url=url, source="USAspending.gov",
+                              published=pub, summary=summary))
+    return items
+
+
 def norm_title(title: str) -> str:
     t = title.lower()
     t = re.sub(r"\s+-\s+[^-]{2,50}$", "", t)
@@ -374,7 +454,37 @@ def tag_html(values: list[str]) -> str:
     return "".join(f'<span class="tag">{esc(v.replace("_", " "))}</span>' for v in values)
 
 
-def render_html(items: list[Item], config: dict, out_path: Path) -> None:
+def md_lite_to_html(md: str) -> str:
+    """Minimal, safe Markdown -> HTML for the LLM summary (escape first, then
+    apply a small subset: bold, bullet lists, paragraphs). Avoids adding a
+    Markdown dependency and never emits unescaped model output."""
+    html_lines: list[str] = []
+    in_list = False
+    for raw in md.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            if in_list:
+                html_lines.append("</ul>")
+                in_list = False
+            continue
+        safe = esc(line.strip())
+        safe = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe)
+        if line.lstrip().startswith(("- ", "* ")):
+            if not in_list:
+                html_lines.append("<ul>")
+                in_list = True
+            html_lines.append(f"<li>{safe[2:].lstrip()}</li>")
+        else:
+            if in_list:
+                html_lines.append("</ul>")
+                in_list = False
+            html_lines.append(f"<p>{safe}</p>")
+    if in_list:
+        html_lines.append("</ul>")
+    return "\n".join(html_lines)
+
+
+def render_html(items: list[Item], config: dict, out_path: Path, summary: str | None = None) -> None:
     b = config["brief"]
     top_n = int(b.get("top_items", 10))
     top = items[:top_n]
@@ -410,6 +520,14 @@ def render_html(items: list[Item], config: dict, out_path: Path) -> None:
     }
     chips = "".join(f'<div class="metric"><b>{v}</b><span>{esc(k)}</span></div>' for k, v in counts.items())
 
+    summary_html = ""
+    if summary:
+        summary_html = (
+            '<section class="pulse"><h2>Market Pulse</h2>'
+            '<div class="pulse-badge">AI-generated from the filtered signals below · verify at source</div>'
+            f'{md_lite_to_html(summary)}</section>'
+        )
+
     doc = f"""<!doctype html>
 <html>
 <head>
@@ -435,12 +553,18 @@ h2{{margin-top:28px}}
 .meta{{font-size:12px;color:#6b7785;margin:7px 0}}
 .summary{{font-size:14px;line-height:1.5}}
 .tag{{display:inline-block;background:#edf2f7;border-radius:999px;padding:4px 8px;margin:7px 5px 0 0;font-size:11px}}
+.pulse{{background:#eef4fb;border:1px solid #cfe0f2;border-left:5px solid #163a5f;border-radius:12px;padding:16px 20px;margin:18px 0}}
+.pulse h2{{margin:0 0 6px;font-size:20px;color:#163a5f}}
+.pulse-badge{{display:inline-block;background:#163a5f;color:white;font-size:11px;border-radius:999px;padding:3px 10px;margin-bottom:8px}}
+.pulse p{{font-size:14px;line-height:1.55;margin:8px 0}}
+.pulse ul{{margin:6px 0 6px 18px;padding:0}} .pulse li{{font-size:14px;line-height:1.5;margin:3px 0}}
 footer{{font-size:12px;color:#6b7785;margin:30px 0}}
 </style>
 </head>
 <body><div class="wrap">
 <header><h1>{esc(b["title"])}</h1><div class="sub">Generated {esc(generated)} · build {esc(build)} · EPS-wide federal market awareness</div></header>
 <div class="metrics">{chips}</div>
+{summary_html}
 <h2>Top Developments</h2>
 {top_html or "<p>No qualifying items in the current window.</p>"}
 <h2>More Worth Knowing</h2>
@@ -450,13 +574,24 @@ footer{{font-size:12px;color:#6b7785;margin:30px 0}}
     out_path.write_text(doc, encoding="utf-8")
 
 
-def render_markdown(items: list[Item], config: dict, out_path: Path) -> None:
+def render_markdown(items: list[Item], config: dict, out_path: Path, summary: str | None = None) -> None:
     b = config["brief"]
     lines = [
         f"# {b['title']}",
         "",
         f"Generated: {datetime.now().astimezone().strftime('%Y-%m-%d %I:%M %p %Z')} · build {build_id()}",
         "",
+    ]
+    if summary:
+        lines += [
+            "## Market Pulse",
+            "",
+            "_AI-generated from the filtered signals below · verify at source_",
+            "",
+            summary,
+            "",
+        ]
+    lines += [
         "## Top Developments",
         "",
     ]
@@ -523,6 +658,87 @@ def write_dropped_log(dropped: list[tuple[Item, str]], out_path: Path) -> None:
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def llm_executive_summary(items: list[Item], config: dict) -> str | None:
+    """Generate a short GovCon-style 'market pulse' narrative over the filtered
+    items using the Anthropic API. Grounded strictly in the items provided.
+
+    Returns Markdown text, or None if disabled, no API key, the SDK is missing,
+    the call fails, or the model declines. Never raises."""
+    lcfg = config.get("llm", {})
+    if not lcfg.get("enabled", False):
+        return None
+    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        print("[warn] LLM summary enabled but ANTHROPIC_API_KEY is not set; skipping.",
+              file=sys.stderr)
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        print("[warn] anthropic package not installed; skipping LLM summary.", file=sys.stderr)
+        return None
+
+    top = items[: int(lcfg.get("max_items", 25))]
+    if not top:
+        return None
+
+    lines = []
+    for i, x in enumerate(top, 1):
+        tags = ", ".join(x.agencies + x.companies + x.capabilities + x.events) or "General"
+        lines.append(f"{i}. {x.title}\n   source: {x.source} | tags: {tags}\n   {x.summary[:300]}")
+    context = "\n".join(lines)
+
+    system = (
+        "You are a government-contracting market analyst for EPS Corporation, an "
+        "engineering and professional-services firm. You write a concise daily "
+        "'market pulse' for capture and business-development staff.\n\n"
+        "Rules:\n"
+        "- Use ONLY the signals provided. Do not invent programs, dollar values, "
+        "agencies, or awards that are not in the list. If something is uncertain, "
+        "say so.\n"
+        "- Be concise and factual. No preamble, no filler, no marketing tone.\n"
+        "- Where useful, note briefly why an item matters to an EPS-type firm "
+        "(engineering, software/IT, logistics, training, program support).\n"
+        "- Output GitHub-flavored Markdown."
+    )
+    prompt = (
+        "Here are today's filtered GovCon signals (already de-duplicated and "
+        "relevance-ranked):\n\n"
+        f"{context}\n\n"
+        "Write the market pulse with these short sections (omit any section with "
+        "nothing to report):\n"
+        "**Market Pulse** — 2-3 sentences on the overall picture today.\n"
+        "**Opportunities to watch** — sources sought / RFIs / forecasts.\n"
+        "**Notable awards** — who won what.\n"
+        "**Policy & regulation** — FAR/DFARS/CMMC/small-business changes.\n"
+        "**Competitive moves** — watchlist companies.\n"
+        "Keep the whole thing under ~300 words."
+    )
+
+    model = str(lcfg.get("model", "claude-sonnet-5"))
+    max_tokens = int(lcfg.get("max_tokens", 2000))
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as exc:
+        print(f"[warn] LLM summary request failed: {exc}", file=sys.stderr)
+        return None
+
+    if getattr(resp, "stop_reason", None) == "refusal":
+        print("[warn] LLM summary was declined by the model; skipping.", file=sys.stderr)
+        return None
+
+    text = "".join(
+        b.text for b in resp.content if getattr(b, "type", None) == "text"
+    ).strip()
+    return text or None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="EPS-wide GovCon morning intelligence aggregator")
     ap.add_argument("--config", default="config.yaml")
@@ -534,16 +750,22 @@ def main() -> int:
     lookback = int(config["brief"].get("lookback_hours", 36))
     min_score = int(config["brief"].get("min_score", 2))
 
+    # Time-sensitive feeds are held to the lookback window...
     print("Collecting Google News RSS...")
     items = google_news_items(config)
     print("Collecting Federal Register...")
     items += federal_register_items(config)
+    items = within_lookback(items, lookback)
+
+    # ...structured sources carry their own date bounds (posted/awarded within N
+    # days), so they bypass the short news window and are appended after it.
     print("Collecting SAM.gov..." if config.get("sam", {}).get("enabled") else "SAM.gov collector disabled.")
     items += sam_items(config)
     print("Collecting GAO bid protests..." if config.get("gao_protests", {}).get("enabled") else "GAO protest collector disabled.")
     items += gao_protest_items(config)
+    print("Collecting USAspending awards..." if config.get("usaspending", {}).get("enabled") else "USAspending collector disabled.")
+    items += usaspending_items(config)
 
-    items = within_lookback(items, lookback)
     items = dedupe(items)
     items = score_items(items, config)
 
@@ -587,13 +809,19 @@ def main() -> int:
             for item, reason in sorted(dropped, key=lambda t: t[0].score, reverse=True)[:preview]:
                 print(f"  - [{reason}] {item.title[:80]}")
 
+    summary = None
+    if config.get("llm", {}).get("enabled"):
+        print("Generating LLM executive summary...")
+        summary = llm_executive_summary(items, config)
+        print("LLM summary generated." if summary else "LLM summary skipped.")
+
     out_dir = Path(config["brief"].get("output_dir", "output"))
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d")
     html_path = out_dir / f"EPS_GovCon_Brief_{stamp}.html"
     md_path = out_dir / f"EPS_GovCon_Brief_{stamp}.md"
-    render_html(items, config, html_path)
-    render_markdown(items, config, md_path)
+    render_html(items, config, html_path, summary=summary)
+    render_markdown(items, config, md_path, summary=summary)
 
     print(f"Wrote {html_path}")
     print(f"Wrote {md_path}")
